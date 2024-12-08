@@ -47,35 +47,35 @@ def farthest_point_sample(point, npoint):
 
 
 class ModelNetDataLoader(Dataset):
-    def __init__(self, root, args, split='train', process_data=False):
+    def __init__(self, root, args, split='train', process_data=False, saved = True):
         self.root = root
         self.npoints = args.num_point
         self.process_data = process_data
         self.uniform = args.use_uniform_sample
         self.use_normals = args.use_normals
         self.num_category = args.num_category
+        if not saved:
+            if self.num_category == 10:
+                self.catfile = os.path.join(self.root, 'modelnet10_shape_names.txt')
+            else:
+                self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
+        
+            self.cat = [line.rstrip() for line in open(self.catfile)]
+            self.classes = dict(zip(self.cat, range(len(self.cat))))
 
-        if self.num_category == 10:
-            self.catfile = os.path.join(self.root, 'modelnet10_shape_names.txt')
-        else:
-            self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
+            shape_ids = {}
+            if self.num_category == 10:
+                shape_ids['train'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet10_train.txt'))]
+                shape_ids['test'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet10_test.txt'))]
+            else:
+                shape_ids['train'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_train.txt'))]
+                shape_ids['test'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_test.txt'))]
 
-        self.cat = [line.rstrip() for line in open(self.catfile)]
-        self.classes = dict(zip(self.cat, range(len(self.cat))))
-
-        shape_ids = {}
-        if self.num_category == 10:
-            shape_ids['train'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet10_train.txt'))]
-            shape_ids['test'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet10_test.txt'))]
-        else:
-            shape_ids['train'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_train.txt'))]
-            shape_ids['test'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_test.txt'))]
-
-        assert (split == 'train' or split == 'test')
-        shape_names = ['_'.join(x.split('_')[0:-1]) for x in shape_ids[split]]
-        self.datapath = [(shape_names[i], os.path.join(self.root, shape_names[i], shape_ids[split][i]) + '.txt') for i
-                         in range(len(shape_ids[split]))]
-        print('The size of %s data is %d' % (split, len(self.datapath)))
+            assert (split == 'train' or split == 'test')
+            shape_names = ['_'.join(x.split('_')[0:-1]) for x in shape_ids[split]]
+            self.datapath = [(shape_names[i], os.path.join(self.root, shape_names[i], shape_ids[split][i]) + '.txt') for i
+                            in range(len(shape_ids[split]))]
+            print('The size of %s data is %d' % (split, len(self.datapath)))
 
         if self.uniform:
             self.save_path = os.path.join(root, 'modelnet%d_%s_%dpts_fps.dat' % (self.num_category, split, self.npoints))
@@ -110,7 +110,8 @@ class ModelNetDataLoader(Dataset):
                     self.list_of_points, self.list_of_labels = pickle.load(f)
 
     def __len__(self):
-        return len(self.datapath)
+        # return len(self.datapath)
+        return len(self.list_of_points)
 
     def _get_item(self, index):
         if self.process_data:
