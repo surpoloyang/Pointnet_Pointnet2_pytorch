@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument('--use_uniform_sample', action='store_true', default=False, help='use uniform sampiling')
     return parser.parse_args()
 
-
+# inplace_relu 是一个函数，通常用于将模型中的 ReLU 激活函数替换为原地（in-place）版本的 ReLU。原地版本的 ReLU 会直接在输入张量上进行操作，而不是创建一个新的张量，从而节省内存并提高计算效率。
 def inplace_relu(m):
     classname = m.__class__.__name__
     if classname.find('ReLU') != -1:
@@ -72,6 +72,7 @@ def test(model, loader, num_class=40):
         mean_correct.append(correct.item() / float(points.size()[0]))
 
     class_acc[:, 2] = class_acc[:, 0] / class_acc[:, 1]
+    # class_acc是分类准确度,应该更能衡量模型的分类好坏
     class_acc = np.mean(class_acc[:, 2])
     instance_acc = np.mean(mean_correct)
 
@@ -187,14 +188,14 @@ def main(args):
 
             pred, trans_feat = classifier(points)
             loss = criterion(pred, target.long(), trans_feat)
-            pred_choice = pred.data.max(1)[1]
+            pred_choice = pred.data.max(1)[1]   # max的[1]是取索引，[0]是取值
 
             correct = pred_choice.eq(target.long().data).cpu().sum()
             mean_correct.append(correct.item() / float(points.size()[0]))
             loss.backward()
             optimizer.step()
             global_step += 1
-
+        # 应该用F1值来评估模型的性能，而不是准确率,个人认为
         train_instance_acc = np.mean(mean_correct)
         log_string('Train Instance Accuracy: %f' % train_instance_acc)
 

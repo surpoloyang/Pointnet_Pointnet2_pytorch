@@ -22,11 +22,13 @@ class get_model(nn.Module):
     def forward(self, x):
         x, trans, trans_feat = self.feat(x)
         x = F.relu(self.bn1(self.fc1(x)))
+        # We use dropout with keep ratio 0.7 on the last fully connected layer, whose output dimension 256, before class score prediction.
         x = F.relu(self.bn2(self.dropout(self.fc2(x))))
         x = self.fc3(x)
         x = F.log_softmax(x, dim=1)
         return x, trans_feat
 
+# A regularization loss (with weight 0.001) is added to the softmax classification loss to make the matrix close to orthogonal.
 class get_loss(torch.nn.Module):
     def __init__(self, mat_diff_loss_scale=0.001):
         super(get_loss, self).__init__()
