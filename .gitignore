@@ -118,3 +118,6 @@ dmypy.json
 
 # data
 data
+
+# visual
+**/visual/
