@@ -50,7 +50,7 @@ class ModelNetDataLoader(Dataset):
     def __init__(self, root, args, split='train', process_data=False, saved = True):
         self.root = root
         self.npoints = args.num_point
-        self.process_data = process_data
+        self.process_data = args.process_data
         self.uniform = args.use_uniform_sample
         self.use_normals = args.use_normals
         self.num_category = args.num_category
@@ -81,7 +81,7 @@ class ModelNetDataLoader(Dataset):
             self.save_path = os.path.join(root, 'modelnet%d_%s_%dpts_fps.dat' % (self.num_category, split, self.npoints))
         else:
             self.save_path = os.path.join(root, 'modelnet%d_%s_%dpts.dat' % (self.num_category, split, self.npoints))
-
+        print(self.save_path)
         if self.process_data:
             if not os.path.exists(self.save_path):
                 print('Processing data %s (only running in the first time)...' % self.save_path)
@@ -108,6 +108,7 @@ class ModelNetDataLoader(Dataset):
                 print('Load processed data from %s...' % self.save_path)
                 with open(self.save_path, 'rb') as f:
                     self.list_of_points, self.list_of_labels = pickle.load(f)
+                    print(len(self.list_of_points))
 
     def __len__(self):
         # return len(self.datapath)
@@ -116,6 +117,7 @@ class ModelNetDataLoader(Dataset):
     def _get_item(self, index):
         if self.process_data:
             point_set, label = self.list_of_points[index], self.list_of_labels[index]
+            # print(point_set.shape)
         else:
             fn = self.datapath[index]
             cls = self.classes[self.datapath[index][0]]
@@ -139,8 +141,35 @@ class ModelNetDataLoader(Dataset):
 
 if __name__ == '__main__':
     import torch
-
-    data = ModelNetDataLoader('/data/modelnet40_normal_resampled/', split='train')
+    import argparse
+    # 获取脚本所在的目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # 获取再上一级的目录
+    parent_dir = os.path.dirname(script_dir)
+    print("Parent directory:", parent_dir)
+    # 将当前工作目录设置为脚本所在的目录
+    os.chdir(parent_dir)
+    print(os.getcwd())
+    def parse_args():
+        '''PARAMETERS'''
+        parser = argparse.ArgumentParser('training')
+        parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu mode')
+        parser.add_argument('--gpu', type=str, default='0', help='specify gpu device')
+        parser.add_argument('--batch_size', type=int, default=24, help='batch size in training')
+        parser.add_argument('--model', default='pointnet_cls', help='model name [default: pointnet_cls]')
+        parser.add_argument('--num_category', default=40, type=int, choices=[10, 40],  help='training on ModelNet10/40')
+        parser.add_argument('--epoch', default=200, type=int, help='number of epoch in training')
+        parser.add_argument('--learning_rate', default=0.001, type=float, help='learning rate in training')
+        parser.add_argument('--num_point', type=int, default=1024, help='Point Number')
+        parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer for training')
+        parser.add_argument('--log_dir', type=str, default=None, help='experiment root')
+        parser.add_argument('--decay_rate', type=float, default=1e-4, help='decay rate')
+        parser.add_argument('--use_normals', action='store_true', default=False, help='use normals')
+        parser.add_argument('--process_data', action='store_true', default=False, help='save data offline')
+        parser.add_argument('--use_uniform_sample', action='store_true', default=False, help='use uniform sampiling')
+        return parser.parse_args()
+    args = parse_args()
+    data = ModelNetDataLoader(r'D:\3Dpointclouds\Pointnet_Pointnet2_pytorch\data\modelnet40_normal_resampled', args, split='train')
     DataLoader = torch.utils.data.DataLoader(data, batch_size=12, shuffle=True)
     for point, label in DataLoader:
         print(point.shape)
