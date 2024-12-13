@@ -7,10 +7,10 @@ from pointnet_utils import PointNetEncoder, feature_transform_reguliarzer
 
 
 class get_model(nn.Module):
-    def __init__(self, num_class):
+    def __init__(self, num_class, channel=6):
         super(get_model, self).__init__()
         self.k = num_class
-        self.feat = PointNetEncoder(global_feat=False, feature_transform=True, channel=9)
+        self.feat = PointNetEncoder(global_feat=False, feature_transform=True, channel=channel)
         self.conv1 = torch.nn.Conv1d(1088, 512, 1)
         self.conv2 = torch.nn.Conv1d(512, 256, 1)
         self.conv3 = torch.nn.Conv1d(256, 128, 1)
@@ -37,11 +37,16 @@ class get_loss(torch.nn.Module):
         super(get_loss, self).__init__()
         self.mat_diff_loss_scale = mat_diff_loss_scale
 
-    def forward(self, pred, target, trans_feat, weight):
-        loss = F.nll_loss(pred, target, weight = weight)
+    def forward(self, pred, target, trans_feat):
+        loss = F.nll_loss(pred, target)
         mat_diff_loss = feature_transform_reguliarzer(trans_feat)
         total_loss = loss + mat_diff_loss * self.mat_diff_loss_scale
         return total_loss
+    # def forward(self, pred, target, trans_feat, weight):
+    #     loss = F.nll_loss(pred, target, weight = weight)
+    #     mat_diff_loss = feature_transform_reguliarzer(trans_feat)
+    #     total_loss = loss + mat_diff_loss * self.mat_diff_loss_scale
+    #     return total_loss
 
 
 if __name__ == '__main__':
