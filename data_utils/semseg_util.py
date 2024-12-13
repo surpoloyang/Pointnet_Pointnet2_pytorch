@@ -36,12 +36,11 @@ g_class2label = {cls: i for i,cls in enumerate(g_classes)}
 # CONVERT ORIGINAL DATA TO OUR DATA_LABEL FILES
 # -----------------------------------------------------------------------------
 
-def collect_point_label(anno_path, out_filename, file_format='txt'):
+def collect_point_label(file_path, out_filename, file_format='txt'):
     """ Convert original dataset files to data_label file (each line is XYZRGBL).
-        We aggregated all the points from each instance in the room.
 
     Args:
-        anno_path: path to annotations. e.g. Area_1/office_2/Annotations/
+        file_path: path to files.
         out_filename: path to save collected points and labels (each line is XYZRGBL)
         file_format: txt or numpy, determines what file format to save.
     Returns:
@@ -49,9 +48,10 @@ def collect_point_label(anno_path, out_filename, file_format='txt'):
     Note:
         the points are shifted before save, the most negative point is now at origin.
     """
-    with open(anno_path, 'r') as f:
-        points = np.loadtxt(f)
-        data_label = points
+    with open(file_path, 'r') as f:
+        data = pd.read_csv(file_path, delimiter=' ')   # xyzrgbl, N*7
+        data = data.values
+        data_label = data
         xyz_min = np.amin(data_label, axis=0)[0:3]
         data_label[:, 0:3] -= xyz_min
     
