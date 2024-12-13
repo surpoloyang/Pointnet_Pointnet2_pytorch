@@ -1,0 +1,8 @@
+2024-12-13 17:22:50,653 - Model - INFO - PARAMETER ...
+2024-12-13 17:22:50,653 - Model - INFO - Namespace(batch_size=128, gpu='0', log_dir='pointnet_sem_trail2', visual=True, num_votes=3)
+2024-12-13 17:22:50,704 - Model - INFO - The number of test data is: 84057
+2024-12-13 17:22:51,265 - Model - INFO - ---- EVALUATION WHOLE SCENE----
+2024-12-13 17:23:25,846 - Model - INFO - eval point avg class IoU: 0.997092
+2024-12-13 17:23:25,847 - Model - INFO - eval point avg class acc: 127.790397
+2024-12-13 17:23:25,847 - Model - INFO - eval point accuracy: 127.829445
+2024-12-13 17:23:25,848 - Model - INFO - Done!
