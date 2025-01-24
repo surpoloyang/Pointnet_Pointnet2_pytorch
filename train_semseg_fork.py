@@ -5,7 +5,7 @@
 '''
 import argparse
 import os
-from data_utils.PSDataLoader import PSDataset
+from data_utils.PSDataLoader import PeedlingsDataset as PSDataset
 import torch
 import datetime
 import logging
@@ -24,10 +24,7 @@ sys.path.append(os.path.join(ROOT_DIR, 'models'))
 
 classes = ['sem', 'leave']
 class2label = {cls: i for i, cls in enumerate(classes)}
-seg_classes = class2label
-seg_label_to_cat = {}
-for i, cat in enumerate(seg_classes.keys()):
-    seg_label_to_cat[i] = cat
+seg2class = {value: key for key, value in class2label.items()}
 
 def inplace_relu(m):
     classname = m.__class__.__name__
@@ -45,7 +42,7 @@ def parse_args():
     parser.add_argument('--optimizer', type=str, default='Adam', help='Adam or SGD [default: Adam]')
     parser.add_argument('--log_dir', type=str, default=None, help='Log path [default: None]')
     parser.add_argument('--decay_rate', type=float, default=1e-4, help='weight decay [default: 1e-4]')
-    # parser.add_argument('--npoint', type=int, default=4096, help='Point Number [default: 4096]')
+    parser.add_argument('--npoint', type=int, default=4096, help='Point Number [default: 4096]')
     parser.add_argument('--step_size', type=int, default=10, help='Decay step for lr decay [default: every 10 epochs]')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
     # parser.add_argument('--test_area', type=int, default=5, help='Which area to use for test, option: 1-6 [default: 5]')
@@ -89,16 +86,14 @@ def main(args):
     log_string('PARAMETER ...')
     log_string(args)
 
-    train_root = 'data/PepperSeedlings/train.txt'
-    test_root = 'data/PepperSeedlings/test.txt'
+    data_dir = 'data'
     NUM_CLASSES = 2
-    # NUM_POINT = args.npoint
+    NUM_POINT = args.npoint
     BATCH_SIZE = args.batch_size
-
     print("start loading training data ...")
-    TRAIN_DATASET = PSDataset(data_root=train_root, transform=None)
+    TRAIN_DATASET = PSDataset(root=data_dir, split='train', transform=None)
     print("start loading test data ...")
-    TEST_DATASET = PSDataset(data_root=test_root, transform=None)
+    TEST_DATASET = PSDataset(root=data_dir, split='test', transform=None)
 
     trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=10,
                                                   pin_memory=True, drop_last=True,
@@ -159,7 +154,7 @@ def main(args):
 
     global_epoch = 0
     best_iou = 0
-
+    weight = torch.tensor([0.5, 0.5]).cuda()
     for epoch in range(start_epoch, args.epoch):
         '''Train on chopped scenes'''
         log_string('**** Epoch %d (%d/%s) ****' % (global_epoch + 1, epoch + 1, args.epoch))
@@ -185,21 +180,22 @@ def main(args):
             points[:, :, :3] = provider.rotate_point_cloud_z(points[:, :, :3])
             points = torch.Tensor(points)
             points, target = points.float().cuda(), target.long().cuda()
-            points = points.transpose(2, 1)
+            points = points.transpose(2, 1) # [B, C, N]
 
             seg_pred, trans_feat = classifier(points)
             seg_pred = seg_pred.contiguous().view(-1, NUM_CLASSES)
 
             batch_label = target.view(-1, 1)[:, 0].cpu().data.numpy()
             target = target.view(-1, 1)[:, 0]
-            loss = criterion(seg_pred, target, trans_feat)
+            loss = criterion(seg_pred, target, trans_feat, torch.tensor([1, 0.5]).cuda())
+            # loss = criterion(seg_pred, target, trans_feat)
             loss.backward()
             optimizer.step()
 
             pred_choice = seg_pred.cpu().data.max(1)[1].numpy()
             correct = np.sum(pred_choice == batch_label)
             total_correct += correct
-            total_seen += BATCH_SIZE
+            total_seen += BATCH_SIZE * NUM_POINT
             loss_sum += loss
         log_string('Training mean loss: %f' % (loss_sum / num_batches))
         log_string('Training accuracy: %f' % (total_correct / float(total_seen)))
@@ -230,8 +226,8 @@ def main(args):
 
             log_string('---- EPOCH %03d EVALUATION ----' % (global_epoch + 1))
             for i, (points, target) in tqdm(enumerate(testDataLoader), total=len(testDataLoader), smoothing=0.9):
-                points = points.data.numpy()
-                points = torch.Tensor(points)
+                # points = points.data.numpy()
+                # points = torch.Tensor(points)
                 points, target = points.float().cuda(), target.long().cuda()
                 points = points.transpose(2, 1)
 
@@ -241,12 +237,13 @@ def main(args):
 
                 batch_label = target.cpu().data.numpy()
                 target = target.view(-1, 1)[:, 0]
-                loss = criterion(seg_pred, target, trans_feat)
+                loss = criterion(seg_pred, target, trans_feat, torch.tensor([1, 0.5]).cuda())
+                # loss = criterion(seg_pred, target, trans_feat)
                 loss_sum += loss
                 pred_val = np.argmax(pred_val, 2)
                 correct = np.sum((pred_val == batch_label))
                 total_correct += correct
-                total_seen += BATCH_SIZE
+                total_seen += BATCH_SIZE * NUM_POINT
                 # tmp, _ = np.histogram(batch_label, range(NUM_CLASSES + 1))
                 # labelweights += tmp
 
@@ -266,12 +263,12 @@ def main(args):
             iou_per_class_str = '------- IoU --------\n'
             for l in range(NUM_CLASSES):
                 iou_per_class_str += 'class %s, IoU: %.3f \n' % (
-                    seg_label_to_cat[l] + ' ' * (14 - len(seg_label_to_cat[l])),
+                    seg2class[l] + ' ' * (14 - len(seg2class[l])),
                     total_correct_class[l] / float(total_iou_deno_class[l]))
 
             log_string(iou_per_class_str)
-            log_string('Eval mean loss: %f' % (loss_sum / num_batches))
-            log_string('Eval accuracy: %f' % (total_correct / float(total_seen)))
+            # log_string('Eval mean loss: %f' % (loss_sum / num_batches))
+            # log_string('Eval accuracy: %f' % (total_correct / float(total_seen)))
 
             if mIoU >= best_iou:
                 best_iou = mIoU

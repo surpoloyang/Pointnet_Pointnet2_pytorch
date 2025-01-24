@@ -9,37 +9,39 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import Dataset
+import h5py
+
+def load_h5_data_label_seg(h5_filename):
+    f = h5py.File(h5_filename)
+    data = f['data'][:]
+    feature = f['rgb'][:]
+    label = f['pid'][:]
+    seg = f['seglabel'][:]
+    return (data, feature, label, seg)
 
 
-class PSDataset(Dataset):
-    def __init__(self, data_root='data/PepperSeedlings/train.txt', transform=None):
-        super().__init__()
-        data = pd.read_csv(data_root, delimiter=' ')   # xyzrgbl, N*7
-        data = data.values
-        points, labels = data[:, 0:6], data[:, 6] # xyzrgb, N*6; l, N
-        xyz_min = np.amin(points, axis=0)[0:3]
-        points[:, :3] -= xyz_min
-        labels = labels.astype(np.int32)
-        tmp, _ = np.histogram(labels, range(3))
-        labelweights = tmp
-        self.labelweights = np.power(np.amax(labelweights) / labelweights, 1 / 3.0)
-        self.transform = transform
-        self.points = points
-        self.labels = labels
+class PeedlingsDataset(Dataset):
+    def __init__(self, root='./data', split='train', transform=None):
+        if split == 'train':
+            
+            self.xyz, self.feature, self.ins, self.sem = load_h5_data_label_seg(os.path.join(root, 'train_aug.h5'))
+            # f = h5py.File(os.path.join(root, 'train.h5'), 'r')
+        else:    
+            self.xyz, self.feature, self.ins, self.sem = load_h5_data_label_seg(os.path.join(root, 'test_aug.h5'))
+            # f = h5py.File(os.path.join(root, 'test.h5'), 'r')
+    def __getitem__(self, index):
+        xyz1 = self.xyz[index]
+        feature1 = self.feature[index]
+        data1 = np.concatenate((xyz1, feature1), axis=-1)
+        # label1 = self.label[index]
+        sem1 = self.sem[index]
+        # obj1 = self.objlabel[index]
+        # sample = {'data': data1, 'feature':feature1,'label': label1, 'seg': seg1}
+        return data1, sem1
 
-        print('read ' + str(len(self.points)) + ' examples')
     def __len__(self):
-        return len(self.points)
+        return len(self.sem)
 
-    def __getitem__(self, idx):
-        point = self.points[idx]
-        label = self.labels[idx]
-        if self.transform:
-            point = self.transform(point)
-        # print(point)
-        point = np.expand_dims(point, 0)
-        # print(point)
-        return point, label
         
 
 

@@ -34,8 +34,8 @@ def square_distance(src, dst):
     """
     B, N, _ = src.shape
     _, M, _ = dst.shape
-    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
+    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1)) # [B, N, M]
+    dist += torch.sum(src ** 2, -1).view(B, N, 1)   
     dist += torch.sum(dst ** 2, -1).view(B, 1, M)
     return dist
 
@@ -214,6 +214,7 @@ class PointNetSetAbstractionMsg(nn.Module):
             convs = nn.ModuleList()
             bns = nn.ModuleList()
             last_channel = in_channel + 3
+            # last_channel = in_channel
             for out_channel in mlp_list[i]:
                 convs.append(nn.Conv2d(last_channel, out_channel, 1))
                 bns.append(nn.BatchNorm2d(out_channel))
@@ -276,41 +277,78 @@ class PointNetFeaturePropagation(nn.Module):
     def forward(self, xyz1, xyz2, points1, points2):
         """
         Input:
-            xyz1: input points position data, [B, C, N]
-            xyz2: sampled input points position data, [B, C, S]
+            xyz1: input points position data, [B, 3, N]
+            xyz2: sampled input points position data, [B, 3, S]
             points1: input points data, [B, D, N]
             points2: input points data, [B, D, S]
         Return:
             new_points: upsampled points data, [B, D', N]
         """
-        xyz1 = xyz1.permute(0, 2, 1)
-        xyz2 = xyz2.permute(0, 2, 1)
+        xyz1 = xyz1.permute(0, 2, 1)    # [B, N, 3]
+        xyz2 = xyz2.permute(0, 2, 1)    # [B, S, 3]
 
-        points2 = points2.permute(0, 2, 1)
+        points2 = points2.permute(0, 2, 1)  # [B, S, D]
         B, N, C = xyz1.shape
         _, S, _ = xyz2.shape
 
         if S == 1:
-            interpolated_points = points2.repeat(1, N, 1)
+            interpolated_points = points2.repeat(1, N, 1)   # [B, N, D]
         else:
-            dists = square_distance(xyz1, xyz2)
+            dists = square_distance(xyz1, xyz2) # [B, N, S]
             dists, idx = dists.sort(dim=-1)
-            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3] 原始点到最近三个采样点的距离
 
-            dist_recip = 1.0 / (dists + 1e-8)
-            norm = torch.sum(dist_recip, dim=2, keepdim=True)
-            weight = dist_recip / norm
+            dist_recip = 1.0 / (dists + 1e-8)   # [B, N, 3]
+            norm = torch.sum(dist_recip, dim=2, keepdim=True)   # [B, N, 1] 归一化因子
+            weight = dist_recip / norm  # [B, N, 3] 距离权重
             interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
 
         if points1 is not None:
-            points1 = points1.permute(0, 2, 1)
+            points1 = points1.permute(0, 2, 1)  # [B, N, D]
             new_points = torch.cat([points1, interpolated_points], dim=-1)
         else:
             new_points = interpolated_points
 
-        new_points = new_points.permute(0, 2, 1)
+        new_points = new_points.permute(0, 2, 1)    # [B, D', N]
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             new_points = F.relu(bn(conv(new_points)))
         return new_points
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction):
+        super(CBAM, self).__init__()
+        self.channels = channels
+        self.reduction = reduction
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+        self.fc1 = nn.Conv1d(self.channels, int(self.channels * self.reduction), kernel_size=1,
+                             padding=0)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Conv1d(int(self.channels * self.reduction), self.channels, kernel_size=1,
+                             padding=0)
+        self.mlp = nn.Sequential(
+            *[self.fc1, self.relu, self.fc2])
+        
+        self.sigmoid = nn.Sigmoid()
+        self.conv_after_concat = nn.Conv1d(2, 1, kernel_size=7, padding=3)
 
+    def forward(self, x):
+        # x: input features with shape [B, C, N]
+        # Channel attention module
+        module_input = x    # [B, C, N]
+        avg = self.avg_pool(x)  # [B, C, 1]
+        mx = self.max_pool(x)
+        avg = self.mlp(avg)
+        mx = self.mlp(mx)
+        channel_out = avg + mx
+        channel_out = self.sigmoid(channel_out)
+        x = module_input * channel_out
+        module_input = x
+        # Spatial attention module
+        avg = torch.mean(x, 1, keepdim=True)    # [B, 1, N]
+        mx, _ = torch.max(x, 1, keepdim=True)
+        x = torch.cat((avg, mx), 1)   # [B, 2, N]
+        x = self.conv_after_concat(x)
+        x = self.sigmoid(x)
+        x = module_input * x
+        return x

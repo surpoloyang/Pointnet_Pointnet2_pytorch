@@ -4,6 +4,7 @@ import torch.nn.parallel
 import torch.utils.data
 from torch.autograd import Variable
 import numpy as np
+import math
 import torch.nn.functional as F
 
 # 因为原文中特征提取网络中的MLP是shared共享参数的，所以使用一维卷积而不是Linear
@@ -156,3 +157,83 @@ def feature_transform_reguliarzer(trans): # trans:B × k × k
         I = I.cuda()
     loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2, 1)) - I, dim=(1, 2)))
     return loss # (1,)
+
+class ChannelAttention(nn.Module):
+    def __init__(self, in_channel, ratio=0.5):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+
+        self.mlp = nn.Sequential(
+            nn.Conv1d(in_channel, int(in_channel * ratio), 1, bias=False),
+            nn.ReLU(),
+            nn.Conv1d(int(in_channel * ratio), in_channel, 1, bias=False))
+
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, x):
+        avg_out = self.mlp(self.avg_pool(x))
+        max_out = self.mlp(self.max_pool(x))
+        out = avg_out + max_out
+        return self.sigmoid(out) * x
+
+class SpatialAttention(nn.Module):
+    def __init__(self):
+        super(SpatialAttention, self).__init__()
+        self.conv = nn.Conv1d(2, 1, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        out = torch.cat([avg_out, max_out], dim=1)
+        out = self.conv(out)
+        return self.sigmoid(out) * x
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction):
+        super(CBAM, self).__init__()
+        self.channel_atten = ChannelAttention(channels, reduction)
+        self.spatial_atten = SpatialAttention()
+
+    def forward(self, x):
+        # x: input features with shape [B, C, N]
+        x = self.channel_atten(x)
+        x = self.spatial_atten(x)
+        return x
+
+class FusedAtten(nn.Module):
+    def __init__(self, channels, reduction):
+        super(FusedAtten, self).__init__()
+        self.channel_atten = ChannelAttention(channels, reduction)
+        self.spatial_atten = SpatialAttention()
+        self.fc = nn.Sequential(
+        nn.Conv1d(3*channels, channels, 1),
+        nn.BatchNorm1d(channels),
+        nn.ReLU())
+        
+    def forward(self, x):
+        # x: input features with shape [B, C, N]
+        f_c = self.channel_atten(x)
+        f_s = self.spatial_atten(x)
+        x = torch.cat([f_c, f_s, x], dim=1)
+        x = self.fc(x)
+        return x
+
+class ECA(nn.Module):
+    def __init__(self, channels, gamma=2, b=1):
+        super(ECA, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.sigmoid = nn.Sigmoid()
+        self.gamma = gamma
+        self.b = b
+        t = int(abs((math.log2(channels) / gamma) + (b / gamma)))
+        k = t if t % 2 else t + 1
+        self.conv = nn.Conv1d(1, 1, k, padding=(k-1) //2, bias=False)
+
+    def forward(self, x):
+        # x: input features with shape [B, C, N]
+        avg_out = self.avg_pool(x)  # [B, C, 1]
+        avg_out = avg_out.permute(0, 2, 1)  # [B, 1, C]
+        out = self.conv(avg_out)    # [B, 1, C]
+        out = out.permute(0, 2, 1)  # [B, C, 1]
+        return self.sigmoid(out) * x

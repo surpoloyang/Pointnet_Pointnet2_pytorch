@@ -4,7 +4,7 @@ Date: Nov 2019
 """
 import argparse
 import os
-from data_utils.PSDataLoader import PSDataset
+from data_utils.PSDataLoader import PeedlingsDataset as PSDataset
 from data_utils.indoor3d_util import g_label2color
 import torch
 import logging
@@ -31,9 +31,9 @@ for i, cat in enumerate(seg_classes.keys()):
 def parse_args():
     '''PARAMETERS'''
     parser = argparse.ArgumentParser('Model')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch size in testing [default: 128]')
+    parser.add_argument('--batch_size', type=int, default=5, help='batch size in testing [default: 128]')
     parser.add_argument('--gpu', type=str, default='0', help='specify gpu device')
-    # parser.add_argument('--num_point', type=int, default=4096, help='point number [default: 4096]')
+    parser.add_argument('--npoint', type=int, default=4096, help='point number [default: 4096]')
     parser.add_argument('--log_dir', type=str, required=True, help='experiment root')
     parser.add_argument('--visual', action='store_true', default=False, help='visualize result [default: False]')
     # parser.add_argument('--test_area', type=int, default=5, help='area for testing, option: 1-6 [default: 5]')
@@ -62,6 +62,12 @@ def main(args):
     visual_dir = experiment_dir + '/visual/'
     visual_dir = Path(visual_dir)
     visual_dir.mkdir(exist_ok=True)
+    GT_DIR = os.path.join(visual_dir, 'gt')
+    os.makedirs(GT_DIR, exist_ok=True)
+    PRED_DIR = os.path.join(visual_dir, 'pred')
+    os.makedirs(PRED_DIR, exist_ok=True)
+    DIFF_DIR = os.path.join(visual_dir, 'diff')
+    os.makedirs(DIFF_DIR, exist_ok=True)
 
     '''LOG'''
     args = parse_args()
@@ -77,11 +83,11 @@ def main(args):
 
     NUM_CLASSES = 2
     BATCH_SIZE = args.batch_size
-    # NUM_POINT = args.num_point
+    NUM_POINT = args.npoint
 
-    root = 'data/PepperSeedlings/test.txt'
+    # root = 'data/PepperSeedlings/test.txt'
 
-    TEST_DATASET = PSDataset(data_root=root, transform=None)
+    TEST_DATASET = PSDataset(split='test', transform=None)
     log_string("The number of test data is: %d" % len(TEST_DATASET))
 
     '''MODEL LOADING'''
@@ -91,11 +97,19 @@ def main(args):
     checkpoint = torch.load(str(experiment_dir) + '/checkpoints/best_model.pth')
     classifier.load_state_dict(checkpoint['model_state_dict'])
     classifier = classifier.eval()
-
+    
+    log_string('%s TEST BEGIN %s' % ('-'*20, '-'*20))
+    # log_string('args')
+    # log_string(str(args)+'\n')
+        # Save results
+    log_string('Save results')
+    log_string('GT: %s' % GT_DIR)
+    log_string('Pred: %s' % PRED_DIR)
+    log_string('Diff: %s' % DIFF_DIR)
+    # Load test data
+    test_data_loader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=BATCH_SIZE, shuffle=False, num_workers=10)
     with torch.no_grad():
-        # Load test data
-        test_data_loader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
-        log_string('---- EVALUATION WHOLE SCENE----')
+        # log_string('---- EVALUATION WHOLE SCENE----')
 
         # Initialize metrics
         total_correct = 0
@@ -104,12 +118,9 @@ def main(args):
         total_seen_class = [0, 0]
         total_correct_class = [0, 0]
         total_iou_deno_class = [0, 0]
-        if args.visual:
-            # for i in range(len(test_data_loader)):
-            fout = open(os.path.join(visual_dir, 'semseg_test_pred.txt'), 'w')
-            fout_gt = open(os.path.join(visual_dir, 'semseg_test_gt_.txt' ), 'w')
+        
         # Iterate over test data
-        for points, target in tqdm(test_data_loader, total=len(test_data_loader)):
+        for batch_id, (points, target) in tqdm(enumerate(test_data_loader), total=len(test_data_loader)):
             points = points.float().cuda()
             target = target.long().cuda()
             points = points.transpose(2, 1)
@@ -121,22 +132,29 @@ def main(args):
             # Calculate metrics
             correct = pred_choice.eq(target.data).cpu().sum()
             total_correct += correct.item()
-            total_seen += BATCH_SIZE
+            total_seen += BATCH_SIZE * NUM_POINT
             
             for l in range(NUM_CLASSES):
                 total_seen_class[l] += np.sum(target.cpu().numpy() == l)
                 total_correct_class[l] += np.sum((pred_choice.cpu().numpy() == l) & (target.cpu().numpy() == l))
                 total_iou_deno_class[l] += np.sum((pred_choice.cpu().numpy() == l) | (target.cpu().numpy() == l))
 
-            # Save visual results
-            for i in range(points.size()[0]):
-                color = g_label2color[pred_choice.reshape(-1)[i].item()]
-                color_gt = g_label2color[target.reshape(-1)[i].item()]
-                fout.write('%f %f %f %d %d %d\n' % (points[i, 0, 0], points[i, 1, 0], points[i, 2, 0], color[0], color[1], color[2]))
-                fout_gt.write('%f %f %f %d %d %d\n' % (points[i, 0, 0], points[i, 1, 0], points[i, 2, 0], color_gt[0], color_gt[1], color_gt[2]))
-        fout.close()
-        fout_gt.close()
+            # Save results
+            if args.visual:
+                pred_choice = pred_choice.cpu().numpy()
+                pts = points.transpose(2,1).cpu().numpy()
+                target = target.cpu().numpy()
+                # diff = np.zeros_like(pts)
+                pts[:,:,3:] = pts[:,:,3:].astype(int)
+                diff = np.where(pred_choice[:, :] != target[:, :], 2, 3)
+                for perbatch in range(args.batch_size):
+                    np.savetxt(os.path.join(DIFF_DIR, f'test_batch{batch_id+1}_{perbatch+1}_diff.txt'), np.column_stack((pts[perbatch], diff[perbatch])), fmt="%f %f %f %d %d %d %d", delimiter=" ")
+                for perbatch in range(args.batch_size):
+                    np.savetxt(os.path.join(PRED_DIR, f'test_batch{batch_id+1}_{perbatch+1}_pred.txt'), np.column_stack((pts[perbatch], pred_choice[perbatch])), fmt="%f %f %f %d %d %d %d", delimiter=" ")
+                    np.savetxt(os.path.join(GT_DIR, f'test_batch{batch_id+1}_{perbatch+1}_gt.txt'), np.column_stack((pts[perbatch], target[perbatch])), fmt="%f %f %f %d %d %d %d", delimiter=" ")
+            
         # Calculate IoU
+        log_string('Calculate Metrics')
         iou_list = np.array(total_correct_class) / (np.array(total_iou_deno_class, dtype=np.float32) + 1e-6)
         mean_iou = np.mean(iou_list)
 
@@ -145,8 +163,9 @@ def main(args):
         log_string('eval point avg class acc: %f' % np.mean(np.array(total_correct_class) / np.array(total_seen_class)))
         log_string('eval point accuracy: %f' % (total_correct / float(total_seen)))
 
-        log_string('Done!')
+        # log_string('Done!')
         # print("Done!")
+    log_string('%s TEST END %s' % ('-'*20, '-'*20))
 
 
 if __name__ == '__main__':

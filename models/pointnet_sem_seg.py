@@ -19,7 +19,7 @@ class get_model(nn.Module):
         self.bn2 = nn.BatchNorm1d(256)
         self.bn3 = nn.BatchNorm1d(128)
 
-    def forward(self, x):
+    def forward(self, x):   # x:[B, 3, N]
         batchsize = x.size()[0]
         n_pts = x.size()[2]
         x, trans, trans_feat = self.feat(x)
@@ -37,16 +37,16 @@ class get_loss(torch.nn.Module):
         super(get_loss, self).__init__()
         self.mat_diff_loss_scale = mat_diff_loss_scale
 
-    def forward(self, pred, target, trans_feat):
-        loss = F.nll_loss(pred, target)
-        mat_diff_loss = feature_transform_reguliarzer(trans_feat)
-        total_loss = loss + mat_diff_loss * self.mat_diff_loss_scale
-        return total_loss
-    # def forward(self, pred, target, trans_feat, weight):
-    #     loss = F.nll_loss(pred, target, weight = weight)
+    # def forward(self, pred, target, trans_feat,weight):
+    #     loss = F.nll_loss(pred, target,weight)
     #     mat_diff_loss = feature_transform_reguliarzer(trans_feat)
     #     total_loss = loss + mat_diff_loss * self.mat_diff_loss_scale
     #     return total_loss
+    def forward(self, pred, target, trans_feat, weight):
+        loss = F.nll_loss(pred, target, weight = weight)
+        mat_diff_loss = feature_transform_reguliarzer(trans_feat)
+        total_loss = loss + mat_diff_loss * self.mat_diff_loss_scale
+        return total_loss
 
 
 if __name__ == '__main__':
