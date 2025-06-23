@@ -6,66 +6,72 @@
 
 import os
 import numpy as np
-import pandas as pd
-from tqdm import tqdm
 from torch.utils.data import Dataset
 import h5py
 
-def load_h5_data_label_seg(h5_filename):
-    f = h5py.File(h5_filename)
+def load_h5_data_label_xyz_semseg(h5_filename):
+    f = h5py.File(h5_filename, 'r')
     data = f['data'][:]
-    feature = f['rgb'][:]
-    label = f['pid'][:]
-    seg = f['seglabel'][:]
-    return (data, feature, label, seg)
+    label = f['seglabel'][:]
+    f.close()
+    return (data, label)
 
 
-class PeedlingsDataset(Dataset):
-    def __init__(self, root='./data', split='train', transform=None):
+class PeedlingsDatasetXYZ(Dataset):
+    def __init__(self, root='./data/Sy2', split='train', transform=None):
         if split == 'train':
-            
-            self.xyz, self.feature, self.ins, self.sem = load_h5_data_label_seg(os.path.join(root, 'train_aug.h5'))
-            # f = h5py.File(os.path.join(root, 'train.h5'), 'r')
+            h5_path = os.path.join(root, 'train_aug.h5')
         else:    
-            self.xyz, self.feature, self.ins, self.sem = load_h5_data_label_seg(os.path.join(root, 'test_aug.h5'))
-            # f = h5py.File(os.path.join(root, 'test.h5'), 'r')
+            h5_path = os.path.join(root, 'test_aug.h5')
+        
+        self.xyz, self.sem = load_h5_data_label_xyz_semseg(h5_path)
+        self.transform = transform # 保存 transform
+
     def __getitem__(self, index):
-        xyz1 = self.xyz[index]
-        feature1 = self.feature[index]
-        data1 = np.concatenate((xyz1, feature1), axis=-1)
-        # label1 = self.label[index]
-        sem1 = self.sem[index]
-        # obj1 = self.objlabel[index]
-        # sample = {'data': data1, 'feature':feature1,'label': label1, 'seg': seg1}
-        return data1, sem1
+        # 加载原始数据
+        points = self.xyz[index]
+        labels = self.sem[index]
+
+        # 创建一个 sample 字典
+        sample = {'points': points, 'labels': labels}
+
+        # 应用变换
+        if self.transform:
+            sample = self.transform(sample)
+        
+        return sample['points'], sample['labels']
 
     def __len__(self):
         return len(self.sem)
 
-        
-
 
 if __name__ == '__main__':
-    import torch, time, random
-    # data_root = r'D:\3Dpointclouds\Pointnet_Pointnet2_pytorch\data\PepperSeedlings\semseg_test.txt'
-    # num_point, test_area, block_size, sample_rate = 4096, 5, 1.0, 0.01
-    data_root = r'data/PepperSeedlings/semseg_test.txt'
-    point_data = PSDataset(data_root=data_root, transform=None)
-    print('point data size:', point_data.__len__())
-    print('point data 0 shape:', point_data.__getitem__(0)[0].shape)
-    print('point label 0 shape:', point_data.__getitem__(0)[1].shape)
-    print('point label 0:', point_data.__getitem__(0)[1])
+    import torch
+    import time
+    import random
+    from torchvision import transforms
+    from ..provider_transformstyle import Normalize, RandomRotate, Jitter, ToTensor # 假设 provider.py 放在同级目录下或可访问的路径
 
-    manual_seed = 123
-    random.seed(manual_seed)
-    np.random.seed(manual_seed)
-    torch.manual_seed(manual_seed)
-    torch.cuda.manual_seed_all(manual_seed)
-    def worker_init_fn(worker_id):
-        random.seed(manual_seed + worker_id)
-    train_loader = torch.utils.data.DataLoader(point_data, batch_size=16, shuffle=True, num_workers=16, pin_memory=True, worker_init_fn=worker_init_fn)
-    # for idx in range(4):
-    #     end = time.time()
-    #     for i, (input, target) in enumerate(train_loader):
-    #         print('time: {}/{}--{}'.format(i+1, len(train_loader), time.time() - end))
-    #         end = time.time()
+    # --- 演示如何使用 ---
+    # 1. 定义变换
+    train_transform = transforms.Compose([
+        Normalize(),
+        # ShufflePoints(), # -- 已移除 --
+        RandomRotate(),
+        Jitter(),
+        ToTensor()
+    ])
+
+    # 2. 创建数据集
+    data_root = '../data/546' # 请替换为您的数据路径
+    point_data = PeedlingsDatasetXYZ(root=data_root, split='train', transform=train_transform)
+    
+    # 3. 创建 DataLoader
+    train_loader = torch.utils.data.DataLoader(point_data, batch_size=4, shuffle=True)
+
+    # 4. 检查输出
+    print('point data size:', point_data.__len__())
+    points, labels = next(iter(train_loader))
+    print('Batch points shape:', points.shape)
+    print('Batch labels shape:', labels.shape)
+    print('Data type after transform:', points.dtype)

@@ -128,7 +128,7 @@ class PointNetEncoder(nn.Module):
         x = F.relu(self.bn1(self.conv1(x)))
         # 第二次转换
         if self.feature_transform:
-            trans_feat = self.fstn(x)
+            trans_feat = self.fstn(x)   # B x 64 x 64
             x = x.transpose(2, 1)
             x = torch.bmm(x, trans_feat)
             x = x.transpose(2, 1)
